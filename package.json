@@ -9,7 +9,7 @@
     "sync": "node sync-from-windows.js",
     "build:html": "node build-html.js",
     "start": "npm run build:html && electron .",
-    "dist:mac": "npm run build:html && electron-builder --mac"
+    "dist:mac": "npm run build:html && electron-builder --mac --publish never"
   },
   "build": {
     "appId": "br.piraru.texturesupply.mac",
