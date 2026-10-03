@@ -1,12 +1,24 @@
 # Gera o instalador de Mac (.dmg universal: chip Apple e Intel) num Mac da nuvem do GitHub.
-# Roda sozinho a cada envio para o GitHub e também pelo botão "Run workflow" na aba Actions.
-# O .dmg aparece em Actions › (a execução) › Artifacts › Texture-Supply-mac.
+#
+# - Envio normal para o main: só gera o .dmg para teste (Actions › execução › Artifacts).
+# - Tag vX.Y.Z (ex.: v1.0.1) ou "Run workflow" com "Publicar" marcado: gera e publica na
+#   página de Releases, onde qualquer pessoa baixa sem precisar de conta:
+#   https://github.com/FRS1S/texture-supply-mac/releases/latest
 name: Gerar versão para Mac
 
 on:
   push:
     branches: [main]
+    tags: ['v*']
   workflow_dispatch:
+    inputs:
+      publicar:
+        description: 'Publicar na página de Releases (download público), usando a "version" do package.json'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # necessário para criar a página de Releases
 
 jobs:
   mac:
@@ -38,7 +50,7 @@ jobs:
           msg=$(tail -n 40 build.log | sed -e 's/%/%25/g' -e 's/\r//g' | awk 'BEGIN{ORS="%0A"}{print}')
           echo "::error title=Erro ao gerar o .dmg::${msg}"
 
-      - name: Disponibilizar o instalador
+      - name: Disponibilizar o instalador (Artifacts)
         uses: actions/upload-artifact@v4
         with:
           name: Texture-Supply-mac
@@ -46,3 +58,26 @@ jobs:
             dist/*.dmg
             dist/*.zip
           retention-days: 30
+
+      - name: Definir a versão a publicar
+        id: versao
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.publicar
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=v$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publicar na página de Releases
+        if: steps.versao.outputs.tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.versao.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: Texture Supply by piraru* ${{ steps.versao.outputs.tag }} para Mac
+          body_path: .github/release-notes.md
+          make_latest: true
+          files: |
+            dist/*.dmg
+            dist/*.zip

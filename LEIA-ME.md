@@ -20,8 +20,23 @@ O GitHub empresta um Mac na nuvem e gera o `.dmg` sozinho, usando `.github/workf
    (leva uns 10 minutos). Se não começar, clique nela › **Run workflow**.
 6. Quando ficar verde, abra a execução e baixe **Texture-Supply-mac** em *Artifacts*. Dentro do .zip está o `.dmg`.
 
-Depois disso, a cada mudança: atualize a página (`npm run sync`), aumente `"version"` no `package.json`,
-e no GitHub Desktop clique em **Commit to main** e **Push origin**. Um `.dmg` novo é gerado sozinho.
+### Página de download para os amigos (Releases)
+
+Link para mandar: **https://github.com/FRS1S/texture-supply-mac/releases/latest**
+(o repositório precisa estar **público** para quem não tem conta conseguir baixar).
+A página já traz o passo a passo de instalação (texto em `.github/release-notes.md`).
+
+### Publicar uma versão nova
+
+1. Atualize a página com as novidades do Windows: `npm run sync`.
+2. Aumente `"version"` no `package.json` (ex.: `1.0.0` → `1.0.1`).
+3. No GitHub Desktop: **Commit to main** e **Push origin**.
+4. No site do GitHub: aba **Actions** › "Gerar versão para Mac" › **Run workflow** › marque
+   **Publicar na página de Releases** › **Run workflow**.
+   Em ~5 minutos a versão nova aparece em Releases com o `.dmg`.
+
+(Alternativa: criar e enviar uma tag `v1.0.1`; o build publica sozinho.)
+Envios normais para o `main` só geram o `.dmg` de teste em Actions › Artifacts, sem publicar.
 
 Repositórios privados têm uma cota mensal grátis de minutos de Mac; para um build por versão ela costuma sobrar.
 
