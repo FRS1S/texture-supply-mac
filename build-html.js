@@ -16,6 +16,7 @@ const FONTS = [
   ['IBM Plex Sans', 'ibm-plex-sans', 600],
   ['Sora', 'sora', 700],
   ['Sora', 'sora', 800],
+  ['VT323', 'vt323', 400],
 ];
 
 let css = '';

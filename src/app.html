@@ -1,7 +1,7 @@
 <title>Texture Supply by piraru*</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Sora:wght@700;800&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Sora:wght@700;800&family=VT323&display=swap">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
 :root{
@@ -55,6 +55,8 @@ aside{grid-area:panel;overflow:auto;background:var(--panel);border-right:1px sol
 .sec-h{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin:4px 0 10px}
 .sec-h h2{margin:0;font:600 12px/1 "IBM Plex Mono",monospace;text-transform:uppercase;letter-spacing:.1em}
 .presets{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.pgroup{grid-column:1/-1;font:600 11px/1 "IBM Plex Mono",monospace;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);padding:8px 0 2px}
+.pgroup:first-child{padding-top:0}
 .preset{display:flex;flex-direction:column;gap:5px;padding:5px;border:1px solid var(--line);border-radius:6px;background:var(--panel-2);cursor:pointer;text-align:left}
 .preset:hover{border-color:var(--accent-2)}
 .preset.on{outline:2px solid var(--accent-line);outline-offset:-1px;border-color:var(--accent-line)}
@@ -325,6 +327,121 @@ function engine(){
     for(let y=0;y<H;y++) for(let x=0;x<W;x++) O[y*W+x]=a[((y/g)|0)*w+((x/g)|0)];
   }
 
+
+  /* ---------- câmera e filme ---------- */
+  // Cada cor de filme: contraste, piso/teto por canal (lift/gain), tom nas sombras e nas luzes, saturação.
+  const LOOKS={
+    portra:{contrast:-.12,lift:[.05,.04,.03],gain:[1,.98,.92],sh:[.02,0,-.01],hi:[.03,.02,-.02],sat:.88},
+    gold:{contrast:.08,lift:[.03,.02,0],gain:[1,.97,.85],sh:[.02,0,-.03],hi:[.04,.02,-.04],sat:1.15},
+    fuji:{contrast:.04,lift:[.02,.05,.06],gain:[.97,1,.98],sh:[-.02,.02,.03],hi:[0,.01,0],sat:1.05},
+    expired:{contrast:-.18,lift:[.10,.07,.12],gain:[.95,.88,.9],sh:[0,.03,.05],hi:[.05,-.02,.02],sat:.75},
+    cross:{contrast:.38,lift:[0,.02,.12],gain:[1.05,1.05,.78],sh:[-.04,0,.06],hi:[.02,.05,-.08],sat:1.3},
+    polaroid:{contrast:-.1,lift:[.07,.07,.09],gain:[1,.96,.9],sh:[-.02,.02,.05],hi:[.05,.02,-.02],sat:.85},
+    vhs:{contrast:.05,lift:[.06,.04,.08],gain:[.96,.94,.97],sh:[.02,0,.04],hi:[.02,0,.02],sat:.78},
+    ccd:{contrast:.12,lift:[0,0,.02],gain:[1,1,1.06],sh:[0,0,.02],hi:[-.01,0,.03],sat:1.22},
+    bw:{contrast:.2,lift:[.03,.03,.03],gain:[.97,.97,.97],bw:true},
+    sepia:{contrast:.05,lift:[.06,.05,.04],gain:[1,.94,.8],bw:true}
+  };
+  const ci=(v,max)=>v<0?0:v>max?max:v;
+  function hblur(a,W,H,r){
+    if(r<1) return a;
+    const out=new Float32Array(a.length), d=2*r+1;
+    for(let y=0;y<H;y++){ const o=y*W; let s=0;
+      for(let i=-r;i<=r;i++) s+=a[o+ci(i,W-1)];
+      for(let x=0;x<W;x++){ out[o+x]=s/d; s+=a[o+Math.min(W-1,x+r+1)]-a[o+Math.max(0,x-r)]; } }
+    return out;
+  }
+  function camera(p,FR,FG,FB,W,H,k,sd){
+    const N=W*H;
+    // 1. cor do filme
+    const L=LOOKS[p.look], la=p.lookAmt==null?1:p.lookAmt;
+    if(L&&la>0){
+      const c=1+L.contrast;
+      for(let i=0;i<N;i++){
+        const r0=FR[i],g0=FG[i],b0=FB[i]; let r=r0,g=g0,b=b0;
+        if(L.bw){ const l=.299*r+.587*g+.114*b; r=g=b=l; }
+        r=(r-.5)*c+.5; g=(g-.5)*c+.5; b=(b-.5)*c+.5;
+        r=L.lift[0]+r*(L.gain[0]-L.lift[0]); g=L.lift[1]+g*(L.gain[1]-L.lift[1]); b=L.lift[2]+b*(L.gain[2]-L.lift[2]);
+        if(L.sh){ const l=clamp01(.299*r+.587*g+.114*b), ws=(1-l)*(1-l), wh=l*l;
+          r+=L.sh[0]*ws+L.hi[0]*wh; g+=L.sh[1]*ws+L.hi[1]*wh; b+=L.sh[2]*ws+L.hi[2]*wh; }
+        if(L.sat&&L.sat!==1){ const l=.299*r+.587*g+.114*b; r=l+(r-l)*L.sat; g=l+(g-l)*L.sat; b=l+(b-l)*L.sat; }
+        FR[i]=r0+(r-r0)*la; FG[i]=g0+(g-g0)*la; FB[i]=b0+(b-b0)*la;
+      }
+    }
+    // 2. lente suave
+    if(p.lensBlur>0){
+      const rad=Math.max(1,Math.round(p.lensBlur*3*k));
+      FR.set(boxBlur(FR,W,H,rad)); FG.set(boxBlur(FG,W,H,rad)); FB.set(boxBlur(FB,W,H,rad));
+    }
+    // 3. halação: as luzes "vazam" um brilho quente em volta
+    if(p.halation>0){
+      const Hm=new Float32Array(N);
+      for(let i=0;i<N;i++) Hm[i]=smooth(.6,1,.299*FR[i]+.587*FG[i]+.114*FB[i]);
+      const rad=Math.max(2,Math.round(14*k)), bl=boxBlur(boxBlur(Hm,W,H,rad),W,H,rad);
+      for(let i=0;i<N;i++){ const h=bl[i]*p.halation; FR[i]+=h*.9; FG[i]+=h*.42; FB[i]+=h*.22; }
+    }
+    // 4. aberração cromática (vermelho e azul se afastam do centro)
+    if(p.chroma>0){
+      const cR=FR.slice(), cB=FB.slice(), cx=W/2, cy=H/2, d=p.chroma*k;
+      for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+        const ox=(x-cx)/cx*d, oy=(y-cy)/cy*d*.5, i=y*W+x;
+        FR[i]=cR[ci(Math.round(y-oy),H-1)*W+ci(Math.round(x-ox),W-1)];
+        FB[i]=cB[ci(Math.round(y+oy),H-1)*W+ci(Math.round(x+ox),W-1)];
+      }
+    }
+    // 5. fita VHS: linhas tremidas, cor borrada na horizontal, faixa de tracking e chiado
+    if(p.vhs>0){
+      const v=p.vhs, rowOff=new Int32Array(H), band=H*(.88+.05*hash(1,2,sd+60));
+      for(let y=0;y<H;y++){
+        let o=(vnoise(.5,y/(30*k),sd+61)-.5)*v*5*k;
+        if(hash((y/(6*k))|0,7,sd+63)>1-.025*v) o+=(hash(y,9,sd+65)-.3)*v*30*k;
+        if(y>band) o+=(hash(y,11,sd+67)-.5)*v*40*k;
+        rowOff[y]=Math.round(o);
+      }
+      const Y=new Float32Array(N); let I=new Float32Array(N), Q=new Float32Array(N);
+      for(let y=0;y<H;y++){ const off=rowOff[y];
+        for(let x=0;x<W;x++){ const si=y*W+ci(x-off,W-1), i=y*W+x, r=FR[si], g=FG[si], b=FB[si];
+          Y[i]=.299*r+.587*g+.114*b; I[i]=.596*r-.274*g-.322*b; Q[i]=.211*r-.523*g+.312*b; } }
+      const rc=Math.max(1,Math.round(5*k*v)), sh=Math.round(2*k*v);
+      I=hblur(hblur(I,W,H,rc),W,H,rc); Q=hblur(hblur(Q,W,H,rc),W,H,rc);
+      const Yb=hblur(Y,W,H,Math.max(1,Math.round(1.2*k)));
+      for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+        const i=y*W+x, j=y*W+ci(x-sh,W-1);
+        let yy=Y[i]+(Yb[i]-Y[i])*.5*v+(hash(x,y,sd+69)-.5)*.1*v;
+        if(y>band&&hash((x/(3*k))|0,y,sd+71)>.88) yy+=.5*v;
+        FR[i]=yy+.956*I[j]+.621*Q[j]; FG[i]=yy-.272*I[j]-.647*Q[j]; FB[i]=yy-1.106*I[j]+1.703*Q[j];
+      }
+    }
+    // 6. linhas de varredura
+    if(p.scan>0){
+      const per=Math.max(2,3*k);
+      for(let y=0;y<H;y++){ const m=1-p.scan*.35*(.5+.5*Math.cos(TAU*y/per)), o=y*W;
+        for(let x=0;x<W;x++){ FR[o+x]*=m; FG[o+x]*=m; FB[o+x]*=m; } }
+    }
+    // 7. vazamento de luz (manchas quentes vindas das bordas)
+    if(p.leak>0){
+      const blobs=[0,1].map(j=>({x:hash(j,1,sd+71)>.5?0:W, y:H*(.2+.6*hash(j,2,sd+73)),
+        s:.35*Math.max(W,H)*(.7+.6*hash(j,3,sd+75)), c:j?[1,.28,.16]:[1,.62,.18]}));
+      for(let y=0;y<H;y++) for(let x=0;x<W;x++){ const i=y*W+x;
+        for(const b of blobs){ const dx=x-b.x, dy=y-b.y, a=p.leak*.9*Math.exp(-(dx*dx+dy*dy)/(2*b.s*b.s));
+          FR[i]=1-(1-FR[i])*(1-b.c[0]*a); FG[i]=1-(1-FG[i])*(1-b.c[1]*a); FB[i]=1-(1-FB[i])*(1-b.c[2]*a); } }
+    }
+    // 8. arranhões de filme (linhas verticais finas, claras e escuras)
+    if(p.scratch>0){
+      const n=Math.round(2+p.scratch*10);
+      for(let j=0;j<n;j++){
+        const x0=hash(j,5,sd+81)*W, light=hash(j,6,sd+82)>.35, wd=Math.max(1,Math.round(k*(.6+hash(j,7,sd+84)*1.2)));
+        const y0=Math.floor(hash(j,8,sd+86)*H*.5), y1=Math.min(H,y0+Math.floor(H*(.4+.6*hash(j,9,sd+88))));
+        for(let y=y0;y<y1;y++){
+          const xx=Math.round(x0+(vnoise(j*3.1,y/(120*k),sd+83)-.5)*14*k), a=p.scratch*.8*(.4+.6*vnoise(j,y/(20*k),sd+85));
+          for(let w=0;w<wd;w++){ const x=xx+w; if(x<0||x>=W) continue; const i=y*W+x;
+            if(light){ FR[i]+=(.95-FR[i])*a; FG[i]+=(.95-FG[i])*a; FB[i]+=(.93-FB[i])*a; }
+            else { const m=1-.45*a; FR[i]*=m; FG[i]*=m; FB[i]*=m; } }
+        }
+      }
+    }
+  }
+
   function processJob(d){
     const t0=Date.now(), W=d.w, H=d.h, p=d.p, k=p.k, N=W*H, src=new Uint8ClampedArray(d.buf);
     const sd=p.seed|0;
@@ -349,7 +466,8 @@ function engine(){
 
     /* 2. Separação em tintas */
     const paper=hex(p.paper), inkCols=p.inks.map(x=>hex(x.hex)), covs=[];
-    if(p.mode==='mono'||p.mode==='gradmap'){
+    if(p.mode==='original'){ /* sem separação: usa a cor da foto */ }
+    else if(p.mode==='mono'||p.mode==='gradmap'){
       const c=new Float32Array(N); for(let i=0;i<N;i++) c[i]=1-Lu[i]; covs.push(c);
     } else if(p.mode==='photo'){
       const c=new Float32Array(N); for(let i=0;i<N;i++) c[i]=clamp01(1-Lu[i]*.82); covs.push(c);
@@ -422,13 +540,15 @@ function engine(){
     const out=new Uint8ClampedArray(N*4), op=p.opacity;
     const offs=(p.offs||[]).map(o=>[Math.round(o.dx*k),Math.round(o.dy*k)]);
     const grad=p.mode==='gradmap'?p.grad.map(hex):null;
-    const photo=p.mode==='photo', amt=p.amount==null?1:p.amount, bm=p.blend||'normal';
+    const photo=p.mode==='photo', orig=p.mode==='original', amt=p.amount==null?1:p.amount, bm=p.blend||'normal';
+    const FR=new Float32Array(N), FG=new Float32Array(N), FB=new Float32Array(N);
     const pt=p.paperTex, gr=p.grain, spk=p.specks, stk=p.streaks, du=p.dust, vg=p.vignette;
     const colAmt=new Float32Array(W);
     if(stk>0) for(let x=0;x<W;x++){ const c=(x/(1.3*k))|0; if(hash(c,3,sd+23)>1-stk*.035) colAmt[x]=.3+.7*hash(c,5,sd+27); }
     for(let y=0;y<H;y++) for(let x=0;x<W;x++){
       const i=y*W+x; let r,g,b;
-      if(grad){
+      if(orig){ r=R[i]; g=G[i]; b=B[i]; }
+      else if(grad){
         const sg=outs[0][i]*3; let i0=sg|0; if(i0>2) i0=2; const f=sg-i0, A=grad[i0], Bc=grad[i0+1];
         r=A[0]+(Bc[0]-A[0])*f; g=A[1]+(Bc[1]-A[1])*f; b=A[2]+(Bc[2]-A[2])*f;
       } else {
@@ -453,6 +573,15 @@ function engine(){
       if(vg>0){ const nx=x/W-.5, ny=y/H-.5, dd=Math.sqrt(nx*nx+ny*ny)*1.414;
         m*=1-vg*.6*smooth(.38,1.05,dd)*(.6+.8*vnoise(x/(110*k),y/(110*k),sd+41)); }
       r*=m; g*=m; b*=m;
+      FR[i]=r; FG[i]=g; FB[i]=b;
+    }
+
+    /* 5. câmera e filme */
+    camera(p,FR,FG,FB,W,H,k,sd);
+
+    /* 6. grão, poeira e mistura com a foto */
+    for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+      const i=y*W+x; let r=FR[i], g=FG[i], b=FB[i];
       if(gr>0){ const n=(hash((x/k)|0,(y/k)|0,sd+11)-.5)*gr*.6; r+=n; g+=n; b+=n; }
       if(du>0 && hash((x/(1.5*k))|0,(y/(1.5*k))|0,sd+37)>1-du*.012){ r=r*.12+paper[0]*.88; g=g*.12+paper[1]*.88; b=b*.12+paper[2]*.88; }
       if(amt<1||bm!=='normal'){
@@ -483,6 +612,37 @@ const $=id=>document.getElementById(id);
 /* ---------- idiomas ---------- */
 const I18N={
 'Abrir imagem':['Open image','Abrir imagen'],
+'Impressão':['Print','Impresión'],'Câmeras antigas':['Vintage cameras','Cámaras antiguas'],
+'Riso Rosa + Azul (sem papel)':['Riso Pink + Blue (no paper)','Riso Rosa + Azul (sin papel)'],
+'Xerox Colorida':['Color Xerox','Xerox a color'],
+'Polaroid 600':['Polaroid 600','Polaroid 600'],'Kodak Portra 400':['Kodak Portra 400','Kodak Portra 400'],
+'Câmera descartável':['Disposable camera','Cámara desechable'],
+'Filme vencido':['Expired film','Película caducada'],
+'Lomo processo cruzado':['Lomo cross-process','Lomo proceso cruzado'],
+'P&B Tri-X':['B&W Tri-X','B/N Tri-X'],
+'Sépia antiga':['Vintage sepia','Sepia antigua'],
+'Cor original':['Original color','Color original'],
+'Sem retícula: ideal para os efeitos de câmera':['No halftone: ideal for camera effects','Sin trama: ideal para efectos de cámara'],
+'Câmera e filme':['Camera & film','Cámara y película'],
+'cor de filme, lente e fita':['film color, lens and tape','color de película, lente y cinta'],
+'Cor do filme':['Film color','Color de película'],
+'Nenhuma':['None','Ninguna'],
+'Processo cruzado':['Cross-process','Proceso cruzado'],
+'CCD digital':['Digital CCD','CCD digital'],
+'P&B (Tri-X)':['B&W (Tri-X)','B/N (Tri-X)'],
+'Sépia':['Sepia','Sepia'],
+'Intensidade da cor do filme':['Film color strength','Intensidad del color de película'],
+'Halação (brilho)':['Halation (glow)','Halación (brillo)'],
+'Lente suave':['Soft lens','Lente suave'],
+'Aberração cromática':['Chromatic aberration','Aberración cromática'],
+'Fita VHS':['VHS tape','Cinta VHS'],
+'Linhas de varredura':['Scanlines','Líneas de barrido'],
+'Vazamento de luz':['Light leak','Fuga de luz'],
+'Arranhões de filme':['Film scratches','Rayones de película'],
+'Moldura':['Frame','Marco'],
+'Filme 35 mm':['35 mm film','Película 35 mm'],
+'Tela de VHS':['VHS screen','Pantalla VHS'],
+'Data impressa':['Date stamp','Fecha impresa'],
 'Desfazer (Ctrl+Z)':['Undo (Ctrl+Z)','Deshacer (Ctrl+Z)'],
 'Refazer (Ctrl+Shift+Z)':['Redo (Ctrl+Shift+Z)','Rehacer (Ctrl+Shift+Z)'],
 'Desfeito':['Undone','Deshecho'],'Refeito':['Redone','Rehecho'],
@@ -723,15 +883,17 @@ const SCREENS=[['round','Pontos redondos'],['ellipse','Pontos elípticos'],['squ
   ['cross','Cruzes'],['line','Linhas'],['wave','Linhas onduladas'],['rings','Anéis concêntricos'],['stochastic','Estocástico (grão)'],
   ['bayer','Pontilhado ordenado (Bayer)'],['fs','Difusão Floyd–Steinberg'],['atkinson','Difusão Atkinson'],['threshold','Limiar (fotocópia)'],['none','Tom contínuo']];
 const AMS=['round','ellipse','square','diamond','cross','line','wave','rings'];
-const MODES=[['mono','Tinta única'],['photo','Cores da foto'],['spot2','Riso 2 tintas'],['spot3','Serigrafia 3 tintas'],['cmyk','CMYK de processo'],['gradmap','Mapa de gradiente']];
+const MODES=[['mono','Tinta única'],['photo','Cores da foto'],['original','Cor original'],['spot2','Riso 2 tintas'],['spot3','Serigrafia 3 tintas'],['cmyk','CMYK de processo'],['gradmap','Mapa de gradiente']];
 const label=(list,v)=>t((list.find(x=>x[0]===v)||['',v])[1]);
 
-const DEFAULTS={amount:1,blend:'normal',hue:0,temp:0,brightness:0,contrast:0,gamma:1,saturation:1,posterize:0,invert:false,
+const DEFAULTS={look:'none',lookAmt:1,halation:0,lensBlur:0,chroma:0,vhs:0,scan:0,leak:0,scratch:0,frame:'none',dateStamp:false,amount:1,blend:'normal',hue:0,temp:0,brightness:0,contrast:0,gamma:1,saturation:1,posterize:0,invert:false,
   screen:'round',cell:8,angle:45,levels:2,softness:1,rough:.1,gain:0,preBlur:.5,
   mode:'mono',paper:'#F3F0E8',ink1:'#1D1D1B',ink2:'#FF48B0',ink3:'#FFE800',opacity:.92,spread:30,gcr:.7,
   misreg:0,wear:0,paperTex:.2,grain:.06,specks:0,streaks:0,dust:0,vignette:0,
   margin:0,bgPattern:'none',bgAmount:.25,bgCount:24,text:'',textSize:24,textPos:'bottom',textStyle:'black',marks:false,colorBar:false,seed:7};
 
+// Receitas de câmera: foto na cor original (sem retícula) + efeitos de filme, lente e fita.
+const CAM={mode:'original',screen:'none',paperTex:0,rough:0,grain:.06};
 const PRESETS=[
   {id:'riso',n:'Riso Rosa + Azul',p:{mode:'spot2',ink1:'#0078BF',ink2:'#FF48B0',screen:'round',cell:7,angle:15,spread:30,misreg:4,grain:.07,wear:.18,paperTex:.25,rough:.12,contrast:.1,marks:true,colorBar:true,margin:6}},
   {id:'xerox',n:'Zine Xerox',p:{mode:'mono',ink1:'#111111',paper:'#EEECE6',screen:'threshold',contrast:.45,brightness:.04,rough:.35,specks:.5,streaks:.45,grain:.12,paperTex:.3,wear:.12,vignette:.35}},
@@ -748,6 +910,20 @@ const PRESETS=[
   {id:'raios',n:'Raios de Sol',p:{mode:'spot2',ink1:'#914E72',ink2:'#FFB511',screen:'diamond',cell:9,spread:30,bgPattern:'rays',bgAmount:.22,bgCount:28,misreg:2.5,wear:.2,grain:.05,paperTex:.3}},
   {id:'foto-reticula',n:'Retícula Colorida',p:{mode:'photo',screen:'round',cell:9,angle:45,paper:'#FFFFFF',saturation:1.25,gain:.2,grain:.04,paperTex:.1,rough:.05}},
   {id:'foto-riso',n:'Foto + Riso (60%)',p:{mode:'spot2',ink1:'#0078BF',ink2:'#FF48B0',screen:'round',cell:6,spread:30,misreg:3,grain:.08,wear:.15,amount:.6,blend:'softlight'}},
+  {id:'riso-solo',n:'Riso Rosa + Azul (sem papel)',p:{mode:'spot2',ink1:'#0078BF',ink2:'#FF48B0',screen:'round',cell:7,angle:15,spread:30,misreg:4,grain:.07,wear:.18,paperTex:.25,rough:.12,contrast:.1}},
+  {id:'xerox-cor',n:'Xerox Colorida',p:{mode:'spot2',ink1:'#111111',ink2:'#FF48B0',paper:'#EEECE6',screen:'threshold',contrast:.35,rough:.3,specks:.35,streaks:.3,grain:.1,paperTex:.3,misreg:3,wear:.1}},
+  {id:'vhs',cat:'cam',n:'VHS',p:{...CAM,look:'vhs',lookAmt:.9,vhs:.7,scan:.45,chroma:2.5,lensBlur:.35,grain:.05,saturation:1.05,frame:'vhsosd'}},
+  {id:'polaroid',cat:'cam',n:'Polaroid 600',p:{...CAM,look:'polaroid',halation:.25,lensBlur:.2,leak:.12,vignette:.2,grain:.05,frame:'polaroid'}},
+  {id:'instax',cat:'cam',n:'Instax',p:{...CAM,look:'fuji',lookAmt:.8,halation:.15,lensBlur:.1,grain:.04,brightness:.04,frame:'instax'}},
+  {id:'portra',cat:'cam',n:'Kodak Portra 400',p:{...CAM,look:'portra',halation:.2,grain:.09,frame:'film35'}},
+  {id:'superia',cat:'cam',n:'Fujifilm Superia',p:{...CAM,look:'fuji',halation:.12,grain:.1,vignette:.15}},
+  {id:'descartavel',cat:'cam',n:'Câmera descartável',p:{...CAM,look:'gold',chroma:1.2,vignette:.35,grain:.12,leak:.18,contrast:.08,dateStamp:true}},
+  {id:'vencido',cat:'cam',n:'Filme vencido',p:{...CAM,look:'expired',grain:.15,leak:.45,dust:.25,scratch:.2,vignette:.25}},
+  {id:'lomo',cat:'cam',n:'Lomo processo cruzado',p:{...CAM,look:'cross',vignette:.55,chroma:1.6,grain:.08,saturation:1.1}},
+  {id:'trix',cat:'cam',n:'P&B Tri-X',p:{...CAM,look:'bw',grain:.2,contrast:.12,scratch:.15,dust:.12,frame:'film35'}},
+  {id:'super8',cat:'cam',n:'Super 8',p:{...CAM,look:'gold',lookAmt:.85,grain:.18,lensBlur:.4,halation:.3,vignette:.4,scratch:.3,dust:.25,frame:'super8'}},
+  {id:'digicam',cat:'cam',n:'Digicam 2000',p:{...CAM,look:'ccd',chroma:1.2,grain:.05,halation:.15,lensBlur:.1,dateStamp:true}},
+  {id:'sepia',cat:'cam',n:'Sépia antiga',p:{...CAM,look:'sepia',vignette:.6,scratch:.25,dust:.3,grain:.12,lensBlur:.25}},
   {id:'cruzes',n:'Trama de Cruzes',p:{mode:'spot2',ink1:'#1D1D1B',ink2:'#FFE800',screen:'cross',cell:8,spread:45,misreg:2,wear:.15,paperTex:.25,grain:.05}}
 ];
 
@@ -777,16 +953,16 @@ const SCHEMA=[
     {k:'gain',l:'Ganho de ponto',type:'range',min:-.5,max:1,step:.01,fmt:spct},
     {k:'preBlur',l:'Suavizar antes',type:'range',min:0,max:1,step:.01,fmt:pct,show:isAM}]},
   {t:'Cor e tintas',hint:'separação',open:true,f:[
-    {k:'mode',l:'Modo de cor',type:'select',opts:MODES},
+    {k:'mode',l:'Modo de cor',type:'select',opts:MODES,note:P=>P.mode==='original'?'Sem retícula: ideal para os efeitos de câmera':''},
     {k:'paper',l:'Papel',type:'color'},
-    {k:'ink1',l:P=>({mono:'Tinta',gradmap:'Sombras',spot2:'Tinta 1 (chave)',spot3:'Tinta 1 (chave)'}[P.mode]||'Tinta 1'),type:'color',show:P=>P.mode!=='cmyk'&&P.mode!=='photo'},
+    {k:'ink1',l:P=>({mono:'Tinta',gradmap:'Sombras',spot2:'Tinta 1 (chave)',spot3:'Tinta 1 (chave)'}[P.mode]||'Tinta 1'),type:'color',show:P=>!['cmyk','photo','original'].includes(P.mode)},
     {k:'ink2',l:P=>P.mode==='gradmap'?'Meios-tons':'Tinta 2',type:'color',show:P=>['spot2','spot3','gradmap'].includes(P.mode)},
     {k:'ink3',l:P=>P.mode==='gradmap'?'Luzes':'Tinta 3',type:'color',show:P=>['spot3','gradmap'].includes(P.mode)},
-    {k:'opacity',l:'Opacidade da tinta',type:'range',min:.3,max:1,step:.01,fmt:pct,show:P=>P.mode!=='gradmap'},
+    {k:'opacity',l:'Opacidade da tinta',type:'range',min:.3,max:1,step:.01,fmt:pct,show:P=>!['gradmap','original'].includes(P.mode)},
     {k:'spread',l:'Defasagem de ângulo entre tintas',type:'range',min:0,max:90,step:1,fmt:v=>v+'°',show:P=>['spot2','spot3'].includes(P.mode)&&isAM(P)},
     {k:'gcr',l:'Substituição por preto (GCR)',type:'range',min:0,max:1,step:.01,fmt:pct,show:P=>P.mode==='cmyk'}]},
   {t:'Registro',hint:'desalinhamento das tintas',open:false,f:[
-    {k:'misreg',l:'Fora de registro',type:'range',min:0,max:20,step:.5,fmt:v=>v+' px',note:P=>['mono','gradmap','photo'].includes(P.mode)?'use um modo com 2+ tintas para ver o efeito':''}]},
+    {k:'misreg',l:'Fora de registro',type:'range',min:0,max:20,step:.5,fmt:v=>v+' px',note:P=>['mono','gradmap','photo','original'].includes(P.mode)?'use um modo com 2+ tintas para ver o efeito':''}]},
   {t:'Textura',hint:'papel, toner e desgaste',open:true,f:[
     {k:'wear',l:'Desgaste da tinta',type:'range',min:0,max:1,step:.01,fmt:pct},
     {k:'paperTex',l:'Fibra do papel',type:'range',min:0,max:1,step:.01,fmt:pct},
@@ -796,6 +972,18 @@ const SCHEMA=[
     {k:'dust',l:'Poeira (falhas brancas)',type:'range',min:0,max:1,step:.01,fmt:pct},
     {k:'vignette',l:'Borda queimada',type:'range',min:0,max:1,step:.01,fmt:pct},
     {k:'seed',l:'Semente do acaso',type:'seed'}]},
+  {t:'Câmera e filme',hint:'cor de filme, lente e fita',open:false,f:[
+    {k:'look',l:'Cor do filme',type:'select',opts:[['none','Nenhuma'],['portra','Kodak Portra'],['gold','Kodak Gold'],['fuji','Fuji'],['expired','Filme vencido'],['cross','Processo cruzado'],['polaroid','Polaroid'],['vhs','VHS'],['ccd','CCD digital'],['bw','P&B (Tri-X)'],['sepia','Sépia']]},
+    {k:'lookAmt',l:'Intensidade da cor do filme',type:'range',min:0,max:1,step:.01,fmt:pct,show:P=>P.look!=='none'},
+    {k:'halation',l:'Halação (brilho)',type:'range',min:0,max:1,step:.01,fmt:pct},
+    {k:'lensBlur',l:'Lente suave',type:'range',min:0,max:1,step:.01,fmt:pct},
+    {k:'chroma',l:'Aberração cromática',type:'range',min:0,max:12,step:.5,fmt:v=>v+' px'},
+    {k:'vhs',l:'Fita VHS',type:'range',min:0,max:1,step:.01,fmt:pct},
+    {k:'scan',l:'Linhas de varredura',type:'range',min:0,max:1,step:.01,fmt:pct},
+    {k:'leak',l:'Vazamento de luz',type:'range',min:0,max:1,step:.01,fmt:pct},
+    {k:'scratch',l:'Arranhões de filme',type:'range',min:0,max:1,step:.01,fmt:pct},
+    {k:'frame',l:'Moldura',type:'select',opts:[['none','Nenhuma'],['polaroid','Polaroid'],['instax','Instax'],['film35','Filme 35 mm'],['super8','Super 8'],['vhsosd','Tela de VHS']]},
+    {k:'dateStamp',l:'Data impressa',type:'check'}]},
   {t:'Grafismos',hint:'marcas, padrões e texto',open:false,f:[
     {k:'bgPattern',l:'Padrão gráfico',type:'select',opts:[['none','Nenhum'],['rays','Raios'],['stripes','Listras diagonais'],['rings','Círculos'],['dots','Grade de pontos']]},
     {k:'bgAmount',l:'Intensidade do padrão',type:'range',min:.05,max:1,step:.01,fmt:pct,show:P=>P.bgPattern!=='none'},
@@ -856,6 +1044,7 @@ function inkList(P){
   switch(P.mode){
     case 'mono': return [{name:inkName(P.ink1),hex:P.ink1,angle:b}];
     case 'photo': return [{name:t('Cores da foto'),hex:'#1D1D1B',angle:b}];
+    case 'original': return [];
     case 'gradmap': return [{name:t('Mapa'),hex:P.ink1,angle:b}];
     case 'spot2': return [P.ink1,P.ink2].map((h,i)=>({name:inkName(h),hex:h,angle:b+i*P.spread}));
     case 'spot3': return [P.ink1,P.ink2,P.ink3].map((h,i)=>({name:inkName(h),hex:h,angle:b+i*P.spread}));
@@ -916,11 +1105,58 @@ function drawText(x,r,P){
   else { x.fillStyle=P.textStyle==='white'?'#fff':'#000'; x.fillText(t,cx,y); }
   x.restore();
 }
+
+// Molduras de câmera e data impressa: desenhadas por cima da imagem já processada.
+function drawFrame(ctx,W,H,P){
+  const u=Math.min(W,H); let inner={x:0,y:0,w:W,h:H};
+  const vt=s=>Math.round(s)+'px VT323, "IBM Plex Mono", monospace';
+  ctx.save();
+  if(P.frame==='polaroid'||P.frame==='instax'){
+    const pol=P.frame==='polaroid', side=u*(pol?.055:.05), top=side*(pol?1:1.25), bot=u*(pol?.2:.17);
+    inner={x:side,y:top,w:W-2*side,h:H-top-bot};
+    ctx.fillStyle=pol?'#F3F1EA':'#FBFAF6';
+    ctx.beginPath(); ctx.rect(0,0,W,H); ctx.rect(inner.x,inner.y,inner.w,inner.h); ctx.fill('evenodd');
+    ctx.strokeStyle='rgba(0,0,0,.22)'; ctx.lineWidth=Math.max(1,u/500); ctx.strokeRect(inner.x,inner.y,inner.w,inner.h);
+    if(!pol){ ctx.globalCompositeOperation='destination-in'; ctx.beginPath(); ctx.roundRect(0,0,W,H,u*.035); ctx.fill(); }
+  } else if(P.frame==='film35'){
+    const band=H*.11, side=W*.018;
+    inner={x:side,y:band,w:W-2*side,h:H-2*band};
+    ctx.fillStyle='#0E0D0C'; ctx.beginPath(); ctx.rect(0,0,W,H); ctx.roundRect(inner.x,inner.y,inner.w,inner.h,u*.01); ctx.fill('evenodd');
+    const hw=band*.36, hh=band*.4, gap=hw*1.9; ctx.fillStyle='#E9E5DA';
+    for(let x=gap*.5;x<W-hw;x+=gap){ ctx.beginPath(); ctx.roundRect(x,band*.1,hw,hh,hw*.2); ctx.roundRect(x,H-band*.1-hh,hw,hh,hw*.2); ctx.fill(); }
+    ctx.fillStyle='#E8A33A'; ctx.font=vt(band*.3); ctx.textBaseline='middle';
+    const ty=H-band*.72, ty2=band*.72; // texto entre os furos e a imagem
+    ctx.textAlign='left'; ctx.fillText((P.look==='bw'?'KODAK 400TX':P.look==='fuji'?'FUJI SUPERIA 400':'KODAK PORTRA 400')+'   ▸ 14',W*.06,ty2);
+    ctx.textAlign='right'; ctx.fillText('14A   ▸   15',W*.94,ty);
+  } else if(P.frame==='super8'){
+    const b=u*.045; inner={x:b,y:b,w:W-2*b,h:H-2*b};
+    ctx.fillStyle='#0A0A0A'; ctx.beginPath(); ctx.rect(0,0,W,H); ctx.roundRect(inner.x,inner.y,inner.w,inner.h,u*.07); ctx.fill('evenodd');
+  } else if(P.frame==='vhsosd'){
+    const fs=H*.065, d=new Date(), mon=['JAN.','FEB.','MAR.','APR.','MAY','JUN.','JUL.','AUG.','SEP.','OCT.','NOV.','DEC.'][d.getMonth()];
+    const hh=d.getHours(), mm=String(d.getMinutes()).padStart(2,'0');
+    ctx.font=vt(fs); ctx.fillStyle='#F4F4F4'; ctx.shadowColor='rgba(0,0,0,.7)'; ctx.shadowOffsetX=fs*.07; ctx.shadowOffsetY=fs*.07; ctx.textBaseline='top';
+    ctx.textAlign='left'; ctx.fillText('PLAY ▶',W*.06,H*.07);
+    ctx.textAlign='right'; ctx.fillText('SP',W*.94,H*.07);
+    ctx.textAlign='left'; ctx.textBaseline='bottom';
+    ctx.fillText((hh<12?'AM ':'PM ')+((hh%12)||12)+':'+mm,W*.06,H*.86);
+    ctx.fillText(mon+' '+String(d.getDate()).padStart(2,'0')+' '+d.getFullYear(),W*.06,H*.93);
+  }
+  ctx.restore();
+  return inner;
+}
+function drawDateStamp(ctx,inner){
+  const d=new Date(), fs=Math.min(inner.w,inner.h)*.06, pad=fs*.8;
+  const txt="'"+String(d.getFullYear()).slice(2)+' '+String(d.getMonth()+1).padStart(2,'0')+' '+String(d.getDate()).padStart(2,'0');
+  ctx.save(); ctx.font=Math.round(fs)+'px VT323, "IBM Plex Mono", monospace'; ctx.textAlign='right'; ctx.textBaseline='bottom';
+  ctx.shadowColor='rgba(255,120,20,.9)'; ctx.shadowBlur=fs*.35; ctx.fillStyle='#FF8A1F';
+  ctx.fillText(txt,inner.x+inner.w-pad,inner.y+inner.h-pad*.7); ctx.restore();
+}
 function drawOverlays(ctx,geo,P,inks,offs){
+  if(P.frame&&P.frame!=='none'||P.dateStamp){ const inner=drawFrame(ctx,geo.W,geo.H,P); if(P.dateStamp) drawDateStamp(ctx,inner); }
   if(!(P.marks||P.colorBar)) return;
   const {inner:r,m,W,H,k}=geo, lw=Math.max(1,Math.min(W,H)/800);
   ctx.save(); ctx.globalCompositeOperation='multiply';
-  const cols=P.mode==='gradmap'?[{hex:P.ink1}]:inks;
+  const cols=P.mode==='gradmap'?[{hex:P.ink1}]:inks.length?inks:[{hex:'#1B1B1B'}];
   if(P.marks) cols.forEach((ink,j)=>{
     const o=offs[j]||{dx:0,dy:0}; ctx.save(); ctx.translate(o.dx*k,o.dy*k);
     ctx.strokeStyle=ink.hex; ctx.lineWidth=lw;
@@ -967,7 +1203,7 @@ async function renderMain(){
   $('st-size').textContent=board.w+' × '+board.h+' px';
   $('st-time').textContent=t('prévia {w}×{h} · {ms} ms',{w:res.w,h:res.h,ms:res.ms});
   $('st-inks').innerHTML='';
-  const shown=P.mode==='photo'?[{name:t('Cores da foto'),hex:'conic-gradient(#f15060,#ffe800,#00a95c,#0078bf,#ff48b0,#f15060)',angle:P.angle}]:P.mode==='gradmap'?[P.ink1,P.ink2,P.ink3,P.paper].map((h,i)=>({name:t(['Sombras','Meios','Luzes','Papel'][i]),hex:h})):inks;
+  const shown=P.mode==='original'?[{name:t('Cor original'),hex:'conic-gradient(#f15060,#ffe800,#00a95c,#0078bf,#ff48b0,#f15060)',angle:P.angle}]:P.mode==='photo'?[{name:t('Cores da foto'),hex:'conic-gradient(#f15060,#ffe800,#00a95c,#0078bf,#ff48b0,#f15060)',angle:P.angle}]:P.mode==='gradmap'?[P.ink1,P.ink2,P.ink3,P.paper].map((h,i)=>({name:t(['Sombras','Meios','Luzes','Papel'][i]),hex:h})):inks;
   shown.forEach(i=>{ const s=document.createElement('span'); s.innerHTML='<b></b>'; s.firstChild.style.background=i.hex;
     s.append(i.name+(P.mode!=='gradmap'&&isAM(P)&&P.screen!=='rings'?' '+(((Math.round(i.angle)%180)+180)%180)+'°':'')); $('st-inks').append(s); });
   updateExportOptions();
@@ -994,11 +1230,18 @@ async function buildThumbs(){
 const fieldEls={};
 function buildPresets(){
   const box=$('presets');
-  PRESETS.forEach(pr=>{
+  const groups=[['print','Impressão'],['cam','Câmeras antigas']];
+  groups.forEach(([cat,title])=>{
+    const h=document.createElement('div'); h.className='pgroup'; h.dataset.i18n=title; h.textContent=t(title); box.append(h);
+    PRESETS.filter(pr=>(pr.cat||'print')===cat).forEach(pr=>addPreset(box,pr));
+  });
+}
+function addPreset(box,pr){
+  {
     const b=document.createElement('button'); b.type='button'; b.className='preset'; b.dataset.id=pr.id;
     b.innerHTML='<canvas width="8" height="10"></canvas><span></span>'; b.querySelector('span').textContent=t(pr.n);
     b.onclick=()=>applyPreset(pr); box.append(b);
-  });
+  }
 }
 function applyPreset(pr){ state.P={...DEFAULTS,...pr.p,text:state.P.text,textSize:state.P.textSize,textPos:state.P.textPos,textStyle:state.P.textStyle}; state.preset=pr.id; syncAll(); persist(); requestRender(); }
 function buildControls(){
@@ -1475,8 +1718,8 @@ applyTheme(); buildPresets(); relabel();
 $('btn-rand').onclick=surprise;
 setImage(sampleSunset(),'sunset');
 if(document.fonts&&document.fonts.load){
-  Promise.all([document.fonts.load('40px Anton'),document.fonts.load('12px "IBM Plex Mono"')]).then(()=>{
-    if($('sample').value==='chart') setImage(sampleChart(),'chart'); else if(state.P.text||state.P.colorBar){ requestRender(); }
+  Promise.all([document.fonts.load('40px Anton'),document.fonts.load('12px "IBM Plex Mono"'),document.fonts.load('20px VT323')]).then(()=>{
+    if($('sample').value==='chart') setImage(sampleChart(),'chart'); else requestRender();
     state.imgId++; renderCount=1; buildThumbs();
   }).catch(()=>{});
 }
