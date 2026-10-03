@@ -12,9 +12,9 @@ jobs:
   mac:
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -23,10 +23,20 @@ jobs:
         run: npm ci
 
       - name: Gerar .dmg
-        run: npm run dist:mac
+        run: |
+          set -o pipefail
+          npm run dist:mac 2>&1 | tee build.log
         env:
           # sem certificado da Apple: o app sai com assinatura ad-hoc (veja o LEIA-ME)
           CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      # Se falhar, as últimas linhas do log viram um aviso no resumo da execução
+      # (visível sem login, ao contrário do log completo).
+      - name: Mostrar o erro do build
+        if: failure()
+        run: |
+          msg=$(tail -n 40 build.log | sed -e 's/%/%25/g' -e 's/\r//g' | awk 'BEGIN{ORS="%0A"}{print}')
+          echo "::error title=Erro ao gerar o .dmg::${msg}"
 
       - name: Disponibilizar o instalador
         uses: actions/upload-artifact@v4
