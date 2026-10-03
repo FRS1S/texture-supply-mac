@@ -1,0 +1,82 @@
+{
+  "name": "texture-supply-mac",
+  "productName": "Texture Supply by piraru",
+  "version": "1.0.0",
+  "description": "Texture Supply by piraru* para macOS: halftones, riso, xerox, serigrafia e texturas de impressão para fotos.",
+  "author": "Francisco Silva",
+  "main": "main.js",
+  "scripts": {
+    "sync": "node sync-from-windows.js",
+    "build:html": "node build-html.js",
+    "start": "npm run build:html && electron .",
+    "dist:mac": "npm run build:html && electron-builder --mac"
+  },
+  "build": {
+    "appId": "br.piraru.texturesupply.mac",
+    "productName": "Texture Supply by piraru",
+    "files": [
+      "main.js",
+      "preload.js",
+      "app/**/*"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "compression": "maximum",
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "category": "public.app-category.graphics-design",
+      "icon": "build/icon.png",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "darkModeSupport": true,
+      "extendInfo": {
+        "CFBundleDisplayName": "Texture Supply by piraru*"
+      },
+      "artifactName": "Texture-Supply-by-piraru-${version}-mac.${ext}"
+    },
+    "dmg": {
+      "title": "Texture Supply by piraru",
+      "window": {
+        "width": 560,
+        "height": 380
+      },
+      "contents": [
+        {
+          "x": 160,
+          "y": 190
+        },
+        {
+          "x": 400,
+          "y": 190,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    }
+  },
+  "devDependencies": {
+    "@fontsource/anton": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/ibm-plex-sans": "^5.3.0",
+    "@fontsource/sora": "^5.3.0",
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3",
+    "jszip": "^3.10.2"
+  }
+}

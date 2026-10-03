@@ -1,0 +1,38 @@
+# Gera o instalador de Mac (.dmg universal: chip Apple e Intel) num Mac da nuvem do GitHub.
+# Roda sozinho a cada envio para o GitHub e também pelo botão "Run workflow" na aba Actions.
+# O .dmg aparece em Actions › (a execução) › Artifacts › Texture-Supply-mac.
+name: Gerar versão para Mac
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  mac:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Gerar .dmg
+        run: npm run dist:mac
+        env:
+          # sem certificado da Apple: o app sai com assinatura ad-hoc (veja o LEIA-ME)
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Disponibilizar o instalador
+        uses: actions/upload-artifact@v4
+        with:
+          name: Texture-Supply-mac
+          path: |
+            dist/*.dmg
+            dist/*.zip
+          retention-days: 30

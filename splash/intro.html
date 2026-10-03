@@ -1,0 +1,47 @@
+<!-- Abertura piraru*: inserida no topo do app pelo build-html.js (só na versão de computador). -->
+<style>
+  #intro{position:fixed;inset:0;z-index:100;background:#B6FF00;display:flex;align-items:center;justify-content:center;
+    opacity:1;transition:opacity 1.6s cubic-bezier(.4,0,.2,1);cursor:pointer}
+  #intro video{width:100%;height:100%;object-fit:contain;display:block}
+  #intro.fade{opacity:0;pointer-events:none}
+  #intro-skip{position:absolute;right:20px;bottom:18px;font:500 12px/1 "IBM Plex Sans","Segoe UI",sans-serif;letter-spacing:.06em;
+    text-transform:uppercase;color:#0A0A0A;background:rgba(10,10,10,.06);border:1px solid rgba(10,10,10,.35);border-radius:99px;
+    padding:8px 13px;cursor:pointer;opacity:.7;transition:opacity .4s}
+  #intro-skip:hover{opacity:1;background:#0A0A0A;color:#B6FF00;border-color:#0A0A0A}
+  #intro.hold #intro-skip,#intro.fade #intro-skip{opacity:0;pointer-events:none}
+</style>
+<div id="intro" aria-hidden="true">
+  <video id="intro-video" src="abertura.mp4" autoplay playsinline preload="auto"></video>
+  <button id="intro-skip" type="button">Pular</button>
+</div>
+<script>
+(function(){
+  const HOLD_MS = 700;   // logo parado depois do fim da animação
+  const FADE_MS = 1600;  // igual à transição de opacidade do CSS
+  const intro = document.getElementById('intro'), v = document.getElementById('intro-video'), skip = document.getElementById('intro-skip');
+  try {
+    const s = (window.desktop && window.desktop.savedSettings && window.desktop.savedSettings.lang) ? window.desktop.savedSettings : JSON.parse(localStorage.getItem('ts-settings') || 'null');
+    skip.textContent = { en: 'Skip', es: 'Saltar' }[s && s.lang] || 'Pular';
+  } catch (e) {}
+  let done = false;
+  function reveal(hold){
+    if (done) return; done = true;
+    intro.classList.add('hold');
+    setTimeout(() => {
+      intro.classList.add('fade');
+      // abaixa o som junto com a imagem
+      const t0 = performance.now(), vol0 = v.volume;
+      (function step(){ const k = Math.min(1, (performance.now() - t0) / FADE_MS); v.volume = vol0 * (1 - k); if (k < 1) requestAnimationFrame(step); })();
+      setTimeout(() => { v.pause(); intro.remove(); }, FADE_MS + 100);
+    }, hold);
+  }
+  v.addEventListener('ended', () => reveal(HOLD_MS));   // o último quadro (logo) fica na tela durante a pausa
+  v.addEventListener('error', () => reveal(0));
+  v.play().catch(() => { v.muted = true; v.play().catch(() => reveal(0)); });
+  intro.addEventListener('click', () => reveal(0));
+  document.addEventListener('keydown', function onKey(e){
+    if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') { reveal(0); document.removeEventListener('keydown', onKey); }
+  });
+  setTimeout(() => reveal(0), 12000); // garantia caso o vídeo trave
+})();
+</script>
