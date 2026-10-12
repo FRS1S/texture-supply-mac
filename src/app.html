@@ -59,6 +59,20 @@ aside{grid-area:panel;overflow:auto;background:var(--panel);border-right:1px sol
 .pgroup:hover{color:var(--ink)}
 .pg-arrow{width:10px;color:var(--accent-line)}
 .pg-count{margin-left:auto;font-weight:500;opacity:.7}
+.preset{position:relative}
+.preset.save-tile{justify-content:center;align-items:center;gap:6px;border-style:dashed;min-height:120px;color:var(--muted);text-align:center}
+.preset.save-tile:hover{color:var(--ink);border-color:var(--accent-line)}
+.save-tile .plus{font:300 34px/1 Sora,"Segoe UI",sans-serif;color:var(--accent-line)}
+.pdel{position:absolute;top:9px;right:9px;width:22px;height:22px;border-radius:50%;border:0;background:rgba(10,10,10,.78);color:#fff;font-size:15px;line-height:1;cursor:pointer;opacity:0;transition:opacity .15s}
+.preset:hover .pdel,.preset:focus-within .pdel{opacity:1}
+.pconfirm{position:absolute;inset:5px;border-radius:4px;background:color-mix(in srgb,var(--panel) 94%,transparent);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;font-size:12px;font-weight:500;text-align:center;padding:8px}
+.pconfirm div{display:flex;gap:6px}
+.pconfirm .btn{height:26px;font-size:12px}
+.mine-tools{grid-column:1/-1;display:flex;gap:6px}
+.mine-tools .btn{flex:1;justify-content:center;height:28px;font-size:12px}
+.mine-empty{grid-column:1/-1;margin:0;font-size:12px;color:var(--muted);line-height:1.45}
+.sp-actions{display:flex;justify-content:flex-end;gap:8px;padding:0 18px 16px}
+#sp-note{margin:0}
 .pgroup:first-child{padding-top:0}
 .preset{display:flex;flex-direction:column;gap:5px;padding:5px;border:1px solid var(--line);border-radius:6px;background:var(--panel-2);cursor:pointer;text-align:left}
 .preset:hover{border-color:var(--accent-2)}
@@ -230,6 +244,21 @@ dialog.settings::backdrop{background:var(--backdrop)}
   </main>
 </div>
 <div class="toast" id="toast" hidden></div>
+<dialog class="settings" id="save-preset" aria-labelledby="sp-title">
+  <form id="sp-form">
+    <div class="set-head"><h2 id="sp-title" data-i18n="Salvar preset">Salvar preset</h2></div>
+    <div class="set-body">
+      <div class="field"><label for="sp-name"><span data-i18n="Nome do preset">Nome do preset</span></label>
+        <input type="text" id="sp-name" maxlength="40" autocomplete="off"></div>
+      <p class="note field" id="sp-note" hidden></p>
+    </div>
+    <div class="sp-actions">
+      <button class="btn" type="button" id="sp-cancel" data-i18n="Cancelar">Cancelar</button>
+      <button class="btn primary" type="submit" data-i18n="Salvar">Salvar</button>
+    </div>
+  </form>
+</dialog>
+<input type="file" id="preset-file" accept=".json,application/json" hidden>
 <dialog class="settings" id="settings" aria-labelledby="set-title">
   <div class="set-head"><h2 id="set-title" data-i18n="Configurações">Configurações</h2>
     <button class="btn icon" id="set-close" type="button" data-i18n-title="Fechar" data-i18n-aria="Fechar" title="Fechar" aria-label="Fechar">
@@ -763,6 +792,18 @@ const $=id=>document.getElementById(id);
 /* ---------- idiomas ---------- */
 const I18N={
 'Abrir imagem':['Open image','Abrir imagen'],
+'Meus presets':['My presets','Mis presets'],'Salvar preset atual':['Save current preset','Guardar preset actual'],
+'Salvar preset':['Save preset','Guardar preset'],'Nome do preset':['Preset name','Nombre del preset'],
+'Salvar':['Save','Guardar'],'Cancelar':['Cancel','Cancelar'],'Excluir':['Delete','Eliminar'],
+'Excluir este preset?':['Delete this preset?','¿Eliminar este preset?'],'Sim':['Yes','Sí'],'Não':['No','No'],
+'Preset salvo: {n}':['Preset saved: {n}','Preset guardado: {n}'],'Preset excluído':['Preset deleted','Preset eliminado'],
+'Já existe um preset com esse nome; salvar vai substituí-lo.':['A preset with this name already exists; saving will replace it.','Ya existe un preset con ese nombre; guardar lo reemplazará.'],
+'Dê um nome ao preset.':['Give the preset a name.','Ponle un nombre al preset.'],
+'Meu preset {n}':['My preset {n}','Mi preset {n}'],
+'Exportar presets':['Export presets','Exportar presets'],'Importar presets':['Import presets','Importar presets'],
+'Nenhum preset salvo ainda. Ajuste os controles e clique em "Salvar preset atual".':['No saved presets yet. Adjust the controls and click "Save current preset".','Aún no hay presets guardados. Ajusta los controles y haz clic en "Guardar preset actual".'],
+'{n} presets importados':['{n} presets imported','{n} presets importados'],
+'Esse arquivo não contém presets do Texture Supply.':['This file has no Texture Supply presets.','Este archivo no contiene presets de Texture Supply.'],
 'Desenho e HQ':['Drawing & comics','Dibujo y cómic'],'Experimental':['Experimental','Experimental'],
 'Quadrinhos (CMY)':['Comics (CMY)','Cómic (CMY)'],'Traço de nanquim':['Ink line art','Trazo de tinta'],'Lápis e carvão':['Pencil & charcoal','Lápiz y carbón'],
 'Aquarela':['Watercolor','Acuarela'],'Marmorizado':['Marbling','Marmoleado'],
@@ -1444,20 +1485,133 @@ async function renderMain(){
 }
 
 /* ---------- miniaturas das receitas ---------- */
+async function thumbOne(pr,myId){
+  if(!state.img) return;
+  const P={...DEFAULTS,...pr.p,seed:pr.user?(pr.p.seed??DEFAULTS.seed):DEFAULTS.seed};
+  const geo=compose(P,300/state.preview,state.img), inks=inkList(P), offs=inkOffsets(P,inks.length);
+  const id=geo.ctx.getImageData(0,0,geo.W,geo.H);
+  const res=await job({w:geo.W,h:geo.H,buf:id.data.buffer,p:workerParams(P,inks,offs,geo.k),seps:false},[id.data.buffer],'thumb');
+  if(!res||myId!==state.imgId) return;
+  const cc=document.createElement('canvas'); cc.width=res.w; cc.height=res.h;
+  const cx=cc.getContext('2d'); cx.putImageData(new ImageData(new Uint8ClampedArray(res.buf),res.w,res.h),0,0);
+  drawOverlays(cx,geo,P,inks,offs);
+  thumbCache.set(pr.id,cc);
+  const c=document.querySelector('.preset[data-id="'+pr.id+'"] canvas');
+  if(c){ c.width=cc.width; c.height=cc.height; c.getContext('2d').drawImage(cc,0,0); }
+}
 async function buildThumbs(){
   if(!state.img) return; const myId=state.imgId;
-  for(const pr of PRESETS){
+  for(const pr of [...userPresets.map(asPreset),...PRESETS]){
     if(myId!==state.imgId) return;
-    const P={...DEFAULTS,...pr.p,seed:DEFAULTS.seed};
-    const geo=compose(P,300/state.preview,state.img), inks=inkList(P), offs=inkOffsets(P,inks.length);
-    const id=geo.ctx.getImageData(0,0,geo.W,geo.H);
-    const res=await job({w:geo.W,h:geo.H,buf:id.data.buffer,p:workerParams(P,inks,offs,geo.k),seps:false},[id.data.buffer],'thumb');
-    if(!res||myId!==state.imgId) continue;
-    const c=document.querySelector('.preset[data-id="'+pr.id+'"] canvas'); c.width=res.w; c.height=res.h;
-    const cx=c.getContext('2d'); cx.putImageData(new ImageData(new Uint8ClampedArray(res.buf),res.w,res.h),0,0);
-    drawOverlays(cx,geo,P,inks,offs);
+    await thumbOne(pr,myId);
   }
 }
+
+/* ---------- meus presets (salvos pelo usuário) ---------- */
+// Guardados no armazenamento da página e, no app de computador, também em presets.json na pasta do app.
+let userPresets=[];
+try{ const u=JSON.parse(localStorage.getItem('ts-user-presets')||'[]'); if(Array.isArray(u)) userPresets=u; }catch(e){}
+try{ const f=window.desktop&&window.desktop.savedPresets; if(Array.isArray(f)&&f.length) userPresets=f; }catch(e){}
+userPresets=userPresets.filter(u=>u&&u.id&&typeof u.n==='string'&&u.p&&typeof u.p==='object');
+function saveUserPresets(){
+  try{ localStorage.setItem('ts-user-presets',JSON.stringify(userPresets)); }catch(e){}
+  if(window.desktop&&window.desktop.savePresets) window.desktop.savePresets(userPresets);
+}
+const asPreset=u=>({id:'u:'+u.id,n:u.n,p:u.p,user:true});
+const allPresets=()=>[...PRESETS,...userPresets.map(asPreset)];
+const findPreset=id=>id?allPresets().find(p=>p.id===id):null;
+const presetLabel=pr=>pr.user?pr.n:t(pr.n);
+const thumbCache=new Map();
+// Só aceita ajustes conhecidos, com o mesmo tipo do padrão (arquivos importados não podem injetar outra coisa).
+function cleanParams(p){
+  const o={};
+  for(const k in DEFAULTS) if(p&&k in p&&typeof p[k]===typeof DEFAULTS[k]&&(typeof p[k]!=='number'||isFinite(p[k]))) o[k]=p[k];
+  return o;
+}
+function packHeader(box,cat,title,count){
+  const h=document.createElement('button'); h.type='button'; h.className='pgroup'; h.dataset.cat=cat;
+  h.innerHTML='<span class="pg-arrow">▾</span><span data-i18n="'+title+'"></span><span class="pg-count">'+count+'</span>';
+  h.querySelector('[data-i18n]').textContent=t(title);
+  h.onclick=()=>{ const i=closedPacks.indexOf(cat); if(i>=0) closedPacks.splice(i,1); else closedPacks.push(cat);
+    try{ localStorage.setItem('ts-packs',JSON.stringify(closedPacks)); }catch(e){} syncPacks(); };
+  box.append(h);
+}
+function buildMine(box){
+  packHeader(box,'mine','Meus presets',userPresets.length);
+  const st=document.createElement('button'); st.type='button'; st.id='btn-save-preset'; st.className='preset save-tile'; st.dataset.cat='mine';
+  st.innerHTML='<span class="plus">+</span><span data-i18n="Salvar preset atual"></span>';
+  st.querySelector('[data-i18n]').textContent=t('Salvar preset atual'); st.onclick=openSavePreset; box.append(st);
+  userPresets.map(asPreset).forEach(pr=>addPreset(box,pr,'mine'));
+  if(!userPresets.length){ const e=document.createElement('p'); e.className='mine-empty'; e.dataset.cat='mine';
+    e.dataset.i18n='Nenhum preset salvo ainda. Ajuste os controles e clique em "Salvar preset atual".'; e.textContent=t(e.dataset.i18n); box.append(e); }
+  const tools=document.createElement('div'); tools.className='mine-tools'; tools.dataset.cat='mine';
+  tools.innerHTML='<button class="btn" type="button" id="btn-presets-export" data-i18n="Exportar presets"></button><button class="btn" type="button" id="btn-presets-import" data-i18n="Importar presets"></button>';
+  tools.querySelectorAll('[data-i18n]').forEach(b=>b.textContent=t(b.dataset.i18n));
+  tools.querySelector('#btn-presets-export').disabled=!userPresets.length;
+  tools.querySelector('#btn-presets-export').onclick=exportPresets;
+  tools.querySelector('#btn-presets-import').onclick=()=>$('preset-file').click();
+  box.append(tools);
+}
+function rebuildGallery(){ $('presets').innerHTML=''; buildPresets(); syncAll(); }
+function askDelete(card,pr){
+  if(card.querySelector('.pconfirm')) return;
+  const c=document.createElement('div'); c.className='pconfirm';
+  c.innerHTML='<span></span><div><button class="btn" type="button" data-a="no"></button><button class="btn primary" type="button" data-a="yes"></button></div>';
+  c.querySelector('span').textContent=t('Excluir este preset?');
+  c.querySelector('[data-a=no]').textContent=t('Não'); c.querySelector('[data-a=yes]').textContent=t('Sim');
+  c.onclick=e=>{ e.stopPropagation(); const a=e.target.dataset.a; if(!a) return;
+    if(a==='yes'){ userPresets=userPresets.filter(u=>'u:'+u.id!==pr.id); saveUserPresets(); thumbCache.delete(pr.id);
+      if(state.preset===pr.id){ state.preset=null; persist(); } rebuildGallery(); toast(t('Preset excluído')); }
+    else c.remove(); };
+  card.append(c); c.querySelector('[data-a=no]').focus();
+}
+function openSavePreset(){
+  const cur=findPreset(state.preset);
+  $('sp-name').value=cur&&cur.user?cur.n:t('Meu preset {n}',{n:userPresets.length+1});
+  spNote(); const d=$('save-preset'); if(d.showModal) d.showModal(); else d.setAttribute('open','');
+  $('sp-name').focus(); $('sp-name').select();
+}
+function spNote(msg){
+  const n=$('sp-name').value.trim().toLowerCase(), note=$('sp-note');
+  const txt=msg||(n&&userPresets.some(u=>u.n.toLowerCase()===n)?t('Já existe um preset com esse nome; salvar vai substituí-lo.'):'');
+  note.textContent=txt; note.hidden=!txt;
+}
+function closeSavePreset(){ const d=$('save-preset'); if(d.close) d.close(); else d.removeAttribute('open'); }
+$('sp-name').addEventListener('input',()=>spNote());
+$('sp-cancel').onclick=closeSavePreset;
+$('sp-form').addEventListener('submit',e=>{
+  e.preventDefault();
+  const name=$('sp-name').value.trim(); if(!name){ spNote(t('Dê um nome ao preset.')); return; }
+  let u=userPresets.find(x=>x.n.toLowerCase()===name.toLowerCase());
+  if(u){ u.n=name; u.p=cleanParams(state.P); u.at=Date.now(); }
+  else { u={id:Date.now().toString(36)+Math.random().toString(36).slice(2,6),n:name,p:cleanParams(state.P),at:Date.now()}; userPresets.push(u); }
+  saveUserPresets(); closeSavePreset();
+  state.preset='u:'+u.id; persist();
+  if(closedPacks.includes('mine')) closedPacks.splice(closedPacks.indexOf('mine'),1);
+  thumbCache.delete('u:'+u.id); rebuildGallery(); thumbOne(asPreset(u),state.imgId);
+  toast(t('Preset salvo: {n}',{n:name}));
+});
+async function exportPresets(){
+  if(!userPresets.length) return;
+  const data={app:'Texture Supply by piraru*',type:'presets',version:1,presets:userPresets.map(u=>({n:u.n,p:u.p}))};
+  await saveFile('texture-supply-presets.json',new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
+}
+$('preset-file').onchange=async e=>{
+  const f=e.target.files[0]; e.target.value=''; if(!f) return;
+  let list=null;
+  try{ const d=JSON.parse(await f.text()); list=Array.isArray(d)?d:d&&d.presets; }catch(err){}
+  list=(Array.isArray(list)?list:[]).filter(x=>x&&typeof x.n==='string'&&x.n.trim()&&x.p&&typeof x.p==='object');
+  if(!list.length){ toast(t('Esse arquivo não contém presets do Texture Supply.')); return; }
+  for(const x of list){
+    let name=x.n.trim().slice(0,40), i=2; const base=name;
+    while(userPresets.some(u=>u.n.toLowerCase()===name.toLowerCase())) name=base+' ('+(i++)+')';
+    userPresets.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2,6),n:name,p:cleanParams(x.p),at:Date.now()});
+  }
+  saveUserPresets();
+  if(closedPacks.includes('mine')) closedPacks.splice(closedPacks.indexOf('mine'),1);
+  rebuildGallery(); state.imgId++; buildThumbs();
+  toast(t('{n} presets importados',{n:list.length}));
+};
 
 /* ---------- painel de controles ---------- */
 const fieldEls={};
@@ -1466,28 +1620,29 @@ let closedPacks=[];
 try{ closedPacks=JSON.parse(localStorage.getItem('ts-packs')||'[]'); }catch(e){}
 function buildPresets(){
   const box=$('presets');
+  buildMine(box);
   PACKS.forEach(([cat,title])=>{
     const list=PRESETS.filter(pr=>(pr.cat||'print')===cat);
-    const h=document.createElement('button'); h.type='button'; h.className='pgroup'; h.dataset.cat=cat;
-    h.innerHTML='<span class="pg-arrow">▾</span><span data-i18n="'+title+'"></span><span class="pg-count">'+list.length+'</span>';
-    h.querySelector('[data-i18n]').textContent=t(title);
-    h.onclick=()=>{ const i=closedPacks.indexOf(cat); if(i>=0) closedPacks.splice(i,1); else closedPacks.push(cat);
-      try{ localStorage.setItem('ts-packs',JSON.stringify(closedPacks)); }catch(e){} syncPacks(); };
-    box.append(h);
+    packHeader(box,cat,title,list.length);
     list.forEach(pr=>addPreset(box,pr,cat));
   });
   syncPacks();
 }
 function syncPacks(){
   document.querySelectorAll('.pgroup').forEach(h=>{ const closed=closedPacks.includes(h.dataset.cat); h.setAttribute('aria-expanded',!closed); h.querySelector('.pg-arrow').textContent=closed?'▸':'▾'; });
-  document.querySelectorAll('.preset').forEach(b=>b.hidden=closedPacks.includes(b.dataset.cat));
+  document.querySelectorAll('#presets [data-cat]:not(.pgroup)').forEach(b=>b.hidden=closedPacks.includes(b.dataset.cat));
 }
 function addPreset(box,pr,cat){
-  {
-    const b=document.createElement('button'); b.type='button'; b.className='preset'; b.dataset.id=pr.id; b.dataset.cat=cat;
-    b.innerHTML='<canvas width="8" height="10"></canvas><span></span>'; b.querySelector('span').textContent=t(pr.n);
-    b.onclick=()=>applyPreset(pr); box.append(b);
-  }
+  // presets do usuário usam <div role=button>, porque levam um botão de excluir dentro
+  const b=document.createElement(pr.user?'div':'button'); b.className='preset'; b.dataset.id=pr.id; b.dataset.cat=cat;
+  if(pr.user){ b.setAttribute('role','button'); b.tabIndex=0; b.addEventListener('keydown',e=>{ if((e.key==='Enter'||e.key===' ')&&e.target===b){ e.preventDefault(); applyPreset(pr); } }); }
+  else b.type='button';
+  b.innerHTML='<canvas width="8" height="10"></canvas><span class="pname"></span>'; b.querySelector('.pname').textContent=presetLabel(pr);
+  const tc=thumbCache.get(pr.id);
+  if(tc){ const c=b.querySelector('canvas'); c.width=tc.width; c.height=tc.height; c.getContext('2d').drawImage(tc,0,0); }
+  if(pr.user){ const del=document.createElement('button'); del.type='button'; del.className='pdel'; del.textContent='×';
+    del.title=t('Excluir'); del.setAttribute('aria-label',t('Excluir')); del.onclick=e=>{ e.stopPropagation(); askDelete(b,pr); }; b.append(del); }
+  b.onclick=()=>applyPreset(pr); box.append(b);
 }
 function applyPreset(pr){ state.P={...DEFAULTS,...pr.p,text:state.P.text,textSize:state.P.textSize,textPos:state.P.textPos,textStyle:state.P.textStyle}; state.preset=pr.id; syncAll(); persist(); requestRender(); }
 function buildControls(){
@@ -1536,7 +1691,7 @@ function syncAll(){
     w.hidden=f.show?!f.show(P):false;
   });
   document.querySelectorAll('.preset').forEach(b=>b.classList.toggle('on',b.dataset.id===state.preset));
-  const pr=PRESETS.find(p=>p.id===state.preset); $('preset-name').textContent=pr?t(pr.n):t('personalizada');
+  const pr=findPreset(state.preset); $('preset-name').textContent=pr?presetLabel(pr):t('personalizada');
 }
 
 /* ---------- surpreenda-me ---------- */
@@ -1601,7 +1756,9 @@ function sampleChart(){
   return c;
 }
 function setImage(img,kind){
-  state.img=img; state.imgId++; renderCount=0;
+  state.img=img; state.imgId++; renderCount=0; thumbCache.clear();
+  // imagem aberta pelo usuário: a prancheta assume o tamanho exato dela e o zoom volta a "Ajustar"
+  if(kind==='user'){ board.ratio='original'; state.zoom='fit'; }
   if(board.ratio==='original'){ boardFromImage(); saveBoard(); syncBoardUI(); syncAll(); }
   $('sample').value=kind; $('sample').querySelector('[value=user]').hidden=kind!=='user';
   resetHistory();
@@ -1883,7 +2040,8 @@ function relabel(){
   document.querySelectorAll('[data-i18n]').forEach(el=>el.textContent=t(el.dataset.i18n));
   document.querySelectorAll('[data-i18n-title]').forEach(el=>el.title=t(el.dataset.i18nTitle));
   document.querySelectorAll('[data-i18n-aria]').forEach(el=>el.setAttribute('aria-label',t(el.dataset.i18nAria)));
-  document.querySelectorAll('.preset').forEach(b=>{ const pr=PRESETS.find(p=>p.id===b.dataset.id); b.querySelector('span').textContent=t(pr.n); });
+  document.querySelectorAll('.preset[data-id]').forEach(b=>{ const pr=findPreset(b.dataset.id); if(pr) b.querySelector('.pname').textContent=presetLabel(pr); });
+  document.querySelectorAll('.pdel').forEach(d=>{ d.title=t('Excluir'); d.setAttribute('aria-label',t('Excluir')); });
   const open=[...document.querySelectorAll('#controls details')].map(d=>d.open);
   clampBoard();
   $('controls').innerHTML=''; for(const k in fieldEls) delete fieldEls[k];

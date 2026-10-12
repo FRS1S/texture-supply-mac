@@ -19,21 +19,25 @@ function saveSetting(key, value) {
 }
 let lang = ['pt', 'en', 'es'].includes(saved.lang) ? saved.lang : 'pt';
 
+// Presets salvos pelo usuário: cópia em presets.json, para não depender só do armazenamento da página.
+const presetsFile = () => path.join(app.getPath('userData'), 'presets.json');
+function readPresets() { try { const v = JSON.parse(fs.readFileSync(presetsFile(), 'utf8')); return Array.isArray(v) ? v : null; } catch (e) { return null; } }
+
 // Textos dos menus nos três idiomas das Configurações.
 const MENU = {
-  pt: { file: 'Arquivo', open: 'Abrir imagem…', exportPng: 'Exportar PNG…', seps: 'Exportar separações (.zip)…', settings: 'Configurações…', quit: 'Sair',
+  pt: { file: 'Arquivo', open: 'Abrir imagem…', savePreset: 'Salvar preset atual…', exportPng: 'Exportar PNG…', seps: 'Exportar separações (.zip)…', settings: 'Configurações…', quit: 'Sair',
         edit: 'Editar', undo: 'Desfazer', redo: 'Refazer', paste: 'Colar imagem', surprise: 'Surpreenda-me',
         view: 'Exibir', zoom: 'Tamanho real / Ajustar', zoomIn: 'Aumentar interface', zoomOut: 'Diminuir interface', zoomReset: 'Interface no tamanho padrão',
         full: 'Tela cheia', reload: 'Recarregar', dev: 'Ferramentas de desenvolvedor',
         help: 'Ajuda', about: 'Sobre o Texture Supply', aboutTitle: 'Sobre', window: 'Janela', prefs: 'Ajustes…',
         aboutText: 'Estúdio de retícula para fotos: halftones, riso, xerox, serigrafia, CMYK e texturas de impressão.\n\nArraste uma imagem para a janela, cole com Ctrl+V ou use Arquivo › Abrir imagem.' },
-  en: { file: 'File', open: 'Open image…', exportPng: 'Export PNG…', seps: 'Export separations (.zip)…', settings: 'Settings…', quit: 'Quit',
+  en: { file: 'File', open: 'Open image…', savePreset: 'Save current preset…', exportPng: 'Export PNG…', seps: 'Export separations (.zip)…', settings: 'Settings…', quit: 'Quit',
         edit: 'Edit', undo: 'Undo', redo: 'Redo', paste: 'Paste image', surprise: 'Surprise me',
         view: 'View', zoom: 'Actual size / Fit', zoomIn: 'Zoom in interface', zoomOut: 'Zoom out interface', zoomReset: 'Default interface size',
         full: 'Full screen', reload: 'Reload', dev: 'Developer tools',
         help: 'Help', about: 'About Texture Supply', aboutTitle: 'About', window: 'Window', prefs: 'Settings…',
         aboutText: 'Halftone studio for photos: halftones, riso, xerox, screenprint, CMYK and print textures.\n\nDrag an image into the window, paste with Ctrl+V or use File › Open image.' },
-  es: { file: 'Archivo', open: 'Abrir imagen…', exportPng: 'Exportar PNG…', seps: 'Exportar separaciones (.zip)…', settings: 'Ajustes…', quit: 'Salir',
+  es: { file: 'Archivo', open: 'Abrir imagen…', savePreset: 'Guardar preset actual…', exportPng: 'Exportar PNG…', seps: 'Exportar separaciones (.zip)…', settings: 'Ajustes…', quit: 'Salir',
         edit: 'Editar', undo: 'Deshacer', redo: 'Rehacer', paste: 'Pegar imagen', surprise: 'Sorpréndeme',
         view: 'Ver', zoom: 'Tamaño real / Ajustar', zoomIn: 'Ampliar interfaz', zoomOut: 'Reducir interfaz', zoomReset: 'Interfaz en tamaño predeterminado',
         full: 'Pantalla completa', reload: 'Recargar', dev: 'Herramientas de desarrollo',
@@ -63,6 +67,7 @@ function buildMenu() {
   const m = MENU[lang] || MENU.pt;
   const fileItems = [
     { label: m.open, accelerator: 'CmdOrCtrl+O', click: () => clickInPage('btn-open') },
+    { label: m.savePreset, accelerator: 'CmdOrCtrl+Shift+P', click: () => clickInPage('btn-save-preset') },
     { label: m.exportPng, accelerator: 'CmdOrCtrl+S', click: () => clickInPage('btn-export') },
     { label: m.seps, accelerator: 'CmdOrCtrl+Shift+S', click: () => clickInPage('btn-seps') },
   ];
@@ -127,6 +132,11 @@ function buildMenu() {
 }
 
 ipcMain.on('ts:get-settings', e => { e.returnValue = saved; });
+ipcMain.on('ts:get-presets', e => { e.returnValue = readPresets(); });
+ipcMain.on('ts:save-presets', (_e, list) => {
+  if (!Array.isArray(list)) return;
+  try { fs.mkdirSync(path.dirname(presetsFile()), { recursive: true }); fs.writeFileSync(presetsFile(), JSON.stringify(list, null, 2)); } catch (e) {}
+});
 ipcMain.on('ts:lang', (_e, l) => { if (!MENU[l]) return; saveSetting('lang', l); if (l !== lang) { lang = l; buildMenu(); } });
 ipcMain.on('ts:theme', (_e, theme) => { if (!BG[theme]) return; saveSetting('theme', theme); if (win) win.setBackgroundColor(BG[theme]); });
 
@@ -153,8 +163,8 @@ function createWindow() {
     item.setSaveDialogOptions({
       title: 'Salvar arquivo',
       defaultPath: path.join(app.getPath('pictures'), name),
-      filters: name.endsWith('.zip')
-        ? [{ name: 'Arquivo ZIP', extensions: ['zip'] }]
+      filters: name.endsWith('.zip') ? [{ name: 'Arquivo ZIP', extensions: ['zip'] }]
+        : name.endsWith('.json') ? [{ name: 'Presets (JSON)', extensions: ['json'] }]
         : [{ name: 'Imagem PNG', extensions: ['png'] }],
     });
   });
